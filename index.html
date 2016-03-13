@@ -38,6 +38,7 @@
             <button class="btn btn-default" onClick="reduceCanvas()">reduce</button>
             <br>
             <canvas id="canvas"></canvas>
+            <canvas id="renderer"></canvas>
           </div>
 	</div>
       </div>
@@ -54,6 +55,9 @@
      uniform float time;
      uniform vec2  mouse;
      uniform vec2  resolution;
+     uniform int sampleNum;
+     uniform float textureWeight;
+     uniform sampler2D texture;
 
      const float PI_4 = 12.566368;
      const float PI = 3.1419;
@@ -66,10 +70,9 @@
 
      //------------------------------------------------------------------
      // from Syntopia http://blog.hvidtfeldts.net/index.php/2015/01/path-tracing-3d-fractals/
-     int sampleIndex = 0;
 
      vec2 rand2n() {
-       vec2 seed = gl_FragCoord.xy * (float(sampleIndex) + 1.0);
+       vec2 seed = gl_FragCoord.xy * (float(sampleNum) + 1.0);
        seed+=vec2(-1,1);
        // implementation based on: lumina.sourceforge.net/Tutorials/Noise.html
        return vec2(fract(sin(dot(seed.xy ,vec2(12.9898,78.233))) * 43758.5453),
@@ -140,7 +143,8 @@
      const int MAX_KLEIN_ITARATION = 20;
      const vec4 initialSp = vec4(-1.);
      vec2 distKlein(vec3 pos){
-       pos = rotate(pos - KLEIN_POS, radians(time * 30.));
+//       pos = rotate(pos - KLEIN_POS, radians(time * 30.));
+       pos -= KLEIN_POS;
        loopNum = 0.;
        float dr = 1.;
        vec4 sp;
@@ -276,20 +280,14 @@
      float fov = radians(60.);
 
      void main(){
-       vec3 sum = vec3(0);
-       const int SAMPLE_NUM = 8;
-       for(int i = 0 ; i < SAMPLE_NUM ; i++){
-         sampleIndex = i;
-         vec2 coordOffset = rand2n();
-         vec3 ray = calcRay(eye, target, up, fov,
-                            resolution.x, resolution.y,
-                            gl_FragCoord.xy + coordOffset);
-         sum += trace(eye, ray);
-       }
-       sum /= float(SAMPLE_NUM);
-       gl_FragColor = vec4(gammaCorrect(sum), 1.);
+       vec2 coordOffset = rand2n();
+       vec3 ray = calcRay(eye, target, up, fov,
+                          resolution.x, resolution.y,
+                          gl_FragCoord.xy + coordOffset);
+       vec3 texture = texture2D(texture, gl_FragCoord.xy ).rgb;
+//       gl_FragColor = vec4(mix(trace(eye, ray), texture, textureWeight), 1.);
+       gl_FragColor = vec4(trace(eye, ray), 1.);
      }
-
     </script>
     <script src="lib/jquery-1.12.0.min.js"></script>
     <script src="main.js" type="text/javascript"></script>
