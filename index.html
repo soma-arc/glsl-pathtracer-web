@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="css/bootstrap.min.css" rel="stylesheet">
+    <title>Path tracing</title>
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="container">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+            <span class="sr-only">Toggle navigation</span>
+          </button>
+          <a class="navbar-brand">Path tracing</a>
+        </div>
+        <div id="navbar" class="collapse navbar-collapse">
+          <ul class="nav navbar-nav">
+            <li class="active"><a >Home</a></li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container">
+      <div class="row">
+	<div class="col-sm-5 col-md-3 sidebar-offcanvas">
+	  <div class="well">
+            <ul class="nav">
+            </ul>
+	  </div>
+        </div>
+	<div class="col-sm-7 col-md-9">
+          <div id="content">
+            <h1 id="title"></h1>
+            <button class="btn btn-default" onClick="enlargeCanvas()">enlarge</button>
+            <button class="btn btn-default" onClick="reduceCanvas()">reduce</button>
+            <br>
+            <canvas id="canvas"></canvas>
+          </div>
+	</div>
+      </div>
+    </div>
+    <script id="vertex" type="x-shader/x-vertex">
+     attribute vec3 position;
+
+     void main(void){
+       gl_Position = vec4(position, 1.0);
+     }
+    </script>
+    <script id="path-frag" type="x-shader/x-fragment">
+     precision mediump float;
+     uniform float time;
+     uniform vec2  mouse;
+     uniform vec2  resolution;
+
+     const float PI_4 = 12.566368;
+     const float PI = 3.1419;
+
+     const float MTL_KLEIN = 1.;
+     const float MTL_PLANE = 2.;
+     const float MTL_SPHERE1 = 3.;
+     const float MTL_SPHERE2 = 4.;
+     const float MTL_SPHERE3 = 5.;
+
+     //------------------------------------------------------------------
+     // from Syntopia http://blog.hvidtfeldts.net/index.php/2015/01/path-tracing-3d-fractals/
+     int sampleIndex = 0;
+
+     vec2 rand2n() {
+       vec2 seed = gl_FragCoord.xy * (float(sampleIndex) + 1.0);
+       seed+=vec2(-1,1);
+       // implementation based on: lumina.sourceforge.net/Tutorials/Noise.html
+       return vec2(fract(sin(dot(seed.xy ,vec2(12.9898,78.233))) * 43758.5453),
+                   fract(cos(dot(seed.xy ,vec2(4.898,7.23))) * 23421.631));
+     }
+
+     vec3 ortho(vec3 v) {
+       //  See : http://lolengine.net/blog/2013/09/21/picking-orthogonal-vector-combing-coconuts
+       return abs(v.x) > abs(v.z) ? vec3(-v.y, v.x, 0.0)  : vec3(0.0, -v.z, v.y);
+     }
+
+     vec3 getSampleBiased(vec3  dir, float power) {
+       dir = normalize(dir);
+       vec3 o1 = normalize(ortho(dir));
+       vec3 o2 = normalize(cross(dir, o1));
+       vec2 r = rand2n();
+       r.x=r.x*2.*PI;
+       r.y=pow(r.y,1.0/(power+1.0));
+       float oneminus = sqrt(1.0-r.y*r.y);
+       return cos(r.x)*oneminus*o1+sin(r.x)*oneminus*o2+r.y*dir;
+     }
+
+     vec3 getSample(vec3 dir) {
+       return getSampleBiased(dir,0.0); // <- unbiased!
+     }
+
+     vec3 getCosineWeightedSample(vec3 dir) {
+       return getSampleBiased(dir,1.0);
+     }
+
+     //------------------------------------------------------------------
+
+     vec3 ROTATION_AXIS = normalize(vec3(0.1, 1, 0.5));
+     vec3 rotate(vec3 p, float angle){
+       float s = sin(angle);
+       float c = cos(angle);
+       float r = 1.0 - c;
+       mat3 m = mat3(ROTATION_AXIS.x * ROTATION_AXIS.x * r + c,
+                     ROTATION_AXIS.y * ROTATION_AXIS.x * r + ROTATION_AXIS.z * s,
+                     ROTATION_AXIS.z * ROTATION_AXIS.x * r - ROTATION_AXIS.y * s,
+                     ROTATION_AXIS.x * ROTATION_AXIS.y * r - ROTATION_AXIS.z * s,
+                     ROTATION_AXIS.y * ROTATION_AXIS.y * r + c,
+                     ROTATION_AXIS.z * ROTATION_AXIS.y * r + ROTATION_AXIS.x * s,
+                     ROTATION_AXIS.x * ROTATION_AXIS.z * r + ROTATION_AXIS.y * s,
+                     ROTATION_AXIS.y * ROTATION_AXIS.z * r - ROTATION_AXIS.x * s,
+                     ROTATION_AXIS.z * ROTATION_AXIS.z * r + c);
+       return m * p;
+     }
+
+     vec2 opUnion(const vec2 d1, const vec2 d2){
+       return (d1.x < d2.x) ? d1 : d2;
+     }
+
+     const vec3 spherePos1 = vec3(5, 5, 0);
+     const vec3 spherePos2 = vec3(5, -5, 0);
+     const vec3 spherePos3 = vec3(-5, 5, 0);
+     const vec3 spherePos4 = vec3(-5, -5, 0);
+     const vec3 spherePos5 = vec3(0, 0, 7.071);
+     const vec3 spherePos6 = vec3(0, 0, -7.071);
+     const float SPHERE_R = 5.;
+     const float SPHERE_R2 = SPHERE_R * SPHERE_R;
+
+     int kleinIteration = 8;
+     float kleinSphereR = 2.0833;
+     float loopNum = 0.;
+     const int SPHERE_NUM = 6;
+     const vec3 KLEIN_POS = vec3(0, 5, 0);
+     const int MAX_KLEIN_ITARATION = 20;
+     const vec4 initialSp = vec4(-1.);
+     vec2 distKlein(vec3 pos){
+       pos = rotate(pos - KLEIN_POS, radians(time * 30.));
+       loopNum = 0.;
+       float dr = 1.;
+       vec4 sp;
+       for(int i = 0 ; i < MAX_KLEIN_ITARATION ; i++){
+         if(i > kleinIteration) break;
+         sp = initialSp;
+
+         float d = distance(pos, spherePos1);
+         sp = (d < SPHERE_R) ? vec4(spherePos1, d) : sp;
+         d = distance(pos, spherePos2);
+         sp = (d < SPHERE_R) ? vec4(spherePos2, d) : sp;
+         d = distance(pos, spherePos3);
+         sp = (d < SPHERE_R) ? vec4(spherePos3, d) : sp;
+         d = distance(pos, spherePos4);
+         sp = (d < SPHERE_R) ? vec4(spherePos4, d) : sp;
+         d = distance(pos, spherePos5);
+         sp = (d < SPHERE_R) ? vec4(spherePos5, d) : sp;
+         d = distance(pos, spherePos6);
+         sp = (d < SPHERE_R) ? vec4(spherePos6, d) : sp;
+
+         if(sp.x == -1.){
+           break;
+         }else{
+           vec3 diff = (pos - sp.xyz);
+           dr *= SPHERE_R2 / dot(diff, diff);
+           pos = (diff * SPHERE_R2)/(sp.w * sp.w) + sp.xyz;
+           loopNum++;
+         }
+       }
+       return vec2((length(pos) - kleinSphereR) / abs(dr) * 0.08, MTL_KLEIN);
+     }
+
+     float distSphere(vec3 pos, vec3 trans, float r){
+       return length(pos - trans) - r;
+     }
+
+     vec3 calcRay (const vec3 eye, const vec3 target, const vec3 up, const float fov,
+                   const float width, const float height, const vec2 coord){
+                     float imagePlane = (height * .5) / tan(fov * .5);
+                     vec3 v = normalize(target - eye);
+                     vec3 xaxis = normalize(cross(v, up));
+                     vec3 yaxis =  normalize(cross(v, xaxis));
+                     vec3 center = v * imagePlane;
+                     vec3 origin = center - (xaxis * (width  *.5)) - (yaxis * (height * .5));
+                     return normalize(origin + (xaxis * coord.x) + (yaxis * (height - coord.y)));
+                   }
+
+     const vec4 K = vec4(1.0, .666666, .333333, 3.0);
+     vec3 hsv2rgb(const vec3 c){
+       vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+       return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+     }
+
+     vec2 distPlane(vec3 p, vec4 n){
+       return vec2(dot(p, n.xyz) + n.w, MTL_PLANE);
+     }
+
+     vec2 distFunc(vec3 p){
+       // vec2 res = opUnion(vec2(distSphere(p, vec3(0, 3, 0), 3.), MTL_SPHERE1),
+       //                    vec2(distSphere(p, vec3(7, 3, 0), 3.), MTL_SPHERE2));
+       // res = opUnion(res, vec2(distSphere(p, vec3(-7, 3, 0), 3.), MTL_SPHERE3));
+       // res = opUnion(res, distPlane(p, vec4(0, 1, 0, 0)));
+       // return res;
+       return opUnion(distKlein(p), distPlane(p, vec4(0, 1, 0, 0)));
+     }
+
+     const vec2 d = vec2(0.01, 0.);
+     vec3 getNormal(const vec3 p){
+       return normalize(vec3(distFunc(p + d.xyy).x - distFunc(p - d.xyy).x,
+                             distFunc(p + d.yxy).x - distFunc(p - d.yxy).x,
+                             distFunc(p + d.yyx).x - distFunc(p - d.yyx).x));
+     }
+
+     const int MAX_MARCHING_LOOP = 700;
+     vec3 march(const vec3 origin, const  vec3 ray, const float threshold){
+       vec3 rayPos = origin;
+       vec2 dist = vec2(0., -1);
+       float rayLength = 0.;
+       for(int i = 0 ; i < MAX_MARCHING_LOOP ; i++){
+         dist = distFunc(rayPos);
+         rayLength += dist.x;
+         rayPos = origin + ray * rayLength ;
+         if(dist.x < threshold) break;
+       }
+       return vec3(dist, rayLength);
+     }
+
+     const vec3 SKY_COLOR = vec3(0.77, 0.75, 0.8);
+     const vec3 BLACK = vec3(0);
+     const int MAX_DEPTH = 3;
+     vec3 trace(vec3 eye, vec3 ray){
+       vec3 li = vec3(1);
+       vec3 matColor = vec3(0);
+       for(int depth = 0 ; depth < 99999 ; depth++){
+         if(depth > MAX_DEPTH) break;
+         vec3 result = march(eye, ray, 0.0001);
+         vec3 intersection = eye + ray * result.z;
+         vec3 normal = getNormal(intersection);
+         if(result.x > 0.0001){
+           return li * SKY_COLOR;
+         }else{
+           if(result.y == MTL_SPHERE1){
+             matColor = vec3(0.5, 0.5, 0.1);
+           }else if(result.y == MTL_SPHERE2){
+             matColor = vec3(0.5, 0.1, 0.1);
+           }else if(result.y == MTL_SPHERE3){
+             matColor = vec3(0.1, 0.5, 0.5);
+           }else if(result.y == MTL_KLEIN){
+             matColor = hsv2rgb(vec3(0.1 + loopNum * 0.1, 1., 1.));
+           }else{
+             matColor = vec3(0.7);
+           }
+           vec3 r = getSample(normal);
+           vec3 fr = matColor / PI;
+           li *= fr * (2. * PI * dot(normal, r));
+           eye = intersection + normal * 0.001;
+           ray = r;
+         }
+       }
+       return vec3(0);
+     }
+
+     const float DISPLAY_GAMMA_COEFF = 1. / 2.2;
+     vec3 gammaCorrect(vec3 rgb) {
+       return vec3((min(pow(rgb.r, DISPLAY_GAMMA_COEFF), 1.)),
+                   (min(pow(rgb.g, DISPLAY_GAMMA_COEFF), 1.)),
+                   (min(pow(rgb.b, DISPLAY_GAMMA_COEFF), 1.)));
+     }
+
+     const vec3 eye = vec3(5 , 5., 10);
+     const vec3 target = vec3(0, 5, 0);
+     const vec3 up = vec3(0, 1, 0);
+     float fov = radians(60.);
+
+     void main(){
+       vec3 sum = vec3(0);
+       const int SAMPLE_NUM = 8;
+       for(int i = 0 ; i < SAMPLE_NUM ; i++){
+         sampleIndex = i;
+         vec2 coordOffset = rand2n();
+         vec3 ray = calcRay(eye, target, up, fov,
+                            resolution.x, resolution.y,
+                            gl_FragCoord.xy + coordOffset);
+         sum += trace(eye, ray);
+       }
+       sum /= float(SAMPLE_NUM);
+       gl_FragColor = vec4(gammaCorrect(sum), 1.);
+     }
+
+    </script>
+    <script src="lib/jquery-1.12.0.min.js"></script>
+    <script src="main.js" type="text/javascript"></script>
+  </body>
+</html>
