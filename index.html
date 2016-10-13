@@ -49,11 +49,40 @@
        gl_Position = vec4(position, 1.0);
      }
     </script>
+    <script id="render-vert" type="x-shader/x-vertex">
+     attribute vec3 position;
+     varying vec2 texCoord;
+     void main(void){
+         texCoord = position.xy * 0.5 + 0.5;
+         gl_Position = vec4(position, 1.0);
+     }
+    </script>
+    <script id="render-frag" type="x-shader/x-vertex">
+     precision mediump float;
+     varying vec2 texCoord;
+     uniform sampler2D texture;
+
+     const float DISPLAY_GAMMA_COEFF = 1. / 2.2;
+     vec4 gammaCorrect(vec4 rgba) {
+         return vec4((min(pow(rgba.r, DISPLAY_GAMMA_COEFF), 1.)),
+                     (min(pow(rgba.g, DISPLAY_GAMMA_COEFF), 1.)),
+                     (min(pow(rgba.b, DISPLAY_GAMMA_COEFF), 1.)),
+                     rgba.a);
+     }
+
+     void main(void){
+         gl_FragColor = gammaCorrect(texture2D(texture, texCoord));
+     }
+    </script>
+
     <script id="path-frag" type="x-shader/x-fragment">
      precision mediump float;
      uniform float time;
      uniform vec2  mouse;
      uniform vec2  resolution;
+     uniform sampler2D texture;
+     uniform int sampleIndex;
+     uniform float textureWeight;
 
      const float PI_4 = 12.566368;
      const float PI = 3.1419;
@@ -66,7 +95,6 @@
 
      //------------------------------------------------------------------
      // from Syntopia http://blog.hvidtfeldts.net/index.php/2015/01/path-tracing-3d-fractals/
-     int sampleIndex = 0;
 
      vec2 rand2n() {
        vec2 seed = gl_FragCoord.xy * (float(sampleIndex) + 1.0);
@@ -140,7 +168,7 @@
      const int MAX_KLEIN_ITARATION = 20;
      const vec4 initialSp = vec4(-1.);
      vec2 distKlein(vec3 pos){
-       pos = rotate(pos - KLEIN_POS, radians(time * 30.));
+       pos -= KLEIN_POS;
        loopNum = 0.;
        float dr = 1.;
        vec4 sp;
@@ -204,7 +232,10 @@
        // res = opUnion(res, vec2(distSphere(p, vec3(-7, 3, 0), 3.), MTL_SPHERE3));
        // res = opUnion(res, distPlane(p, vec4(0, 1, 0, 0)));
        // return res;
-       return opUnion(distKlein(p), distPlane(p, vec4(0, 1, 0, 0)));
+         return opUnion(distKlein(p), distPlane(p, vec4(0, 1, 0, 0)));
+//         return distSphere(p, vec3(0), MTL_SPHERE1);
+//         return distPlane(p, vec4(0, 1, 0, 0));
+//         return distKlein(p);
      }
 
      const vec2 d = vec2(0.01, 0.);
@@ -277,17 +308,14 @@
 
      void main(){
        vec3 sum = vec3(0);
-       const int SAMPLE_NUM = 8;
-       for(int i = 0 ; i < SAMPLE_NUM ; i++){
-         sampleIndex = i;
          vec2 coordOffset = rand2n();
          vec3 ray = calcRay(eye, target, up, fov,
                             resolution.x, resolution.y,
                             gl_FragCoord.xy + coordOffset);
-         sum += trace(eye, ray);
-       }
-       sum /= float(SAMPLE_NUM);
-       gl_FragColor = vec4(gammaCorrect(sum), 1.);
+         vec3 col = trace(eye, ray);
+
+         vec3 texture = texture2D(texture, gl_FragCoord.xy / resolution).rgb;
+         gl_FragColor = vec4(mix(col, texture, textureWeight), 1.0);
      }
 
     </script>

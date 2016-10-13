@@ -9,7 +9,7 @@ var content
 window.addEventListener('load', function(event){
     readme = $('#readme');
     content = $('#content');
-    loadShader("path-frag", 300, 300);
+    loadShader("path-frag", 256, 256);
 }, false);
 
 function showReadme(){
@@ -55,35 +55,99 @@ function loadShader(fragShaderName, width, height){
 
     var dfd = attachShader(fragShaderName, program, gl.FRAGMENT_SHADER);
     var dfd2 = attachShader('vertex', program, gl.VERTEX_SHADER);
-    $.when(dfd, dfd2).done(function(){
+
+    var renderProgram = gl.createProgram();
+    var dfd3 = attachShader('render-frag', renderProgram, gl.FRAGMENT_SHADER);
+    var dfd4 = attachShader('render-vert', renderProgram, gl.VERTEX_SHADER);
+
+
+    $.when(dfd, dfd2, dfd3, dfd4).done(function(){
+
+        var type = gl.getExtension('OES_texture_float') ? gl.FLOAT : gl.UNSIGNED_BYTE;
+        var textures = [];
+        for(var i = 0; i < 2; i++) {
+            textures.push(gl.createTexture());
+            gl.bindTexture(gl.TEXTURE_2D, textures[i]);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, cw, ch, 0, gl.RGB,  gl.FLOAT , null);
+        }
+        gl.bindTexture(gl.TEXTURE_2D, null);
+
         var prg = linkProgram(program);
 	uniLocation[0] = gl.getUniformLocation(prg, 'time');
 	uniLocation[1] = gl.getUniformLocation(prg, 'mouse');
 	uniLocation[2] = gl.getUniformLocation(prg, 'resolution');
+        uniLocation[3] = gl.getUniformLocation(prg, 'texture');
+        uniLocation[4] = gl.getUniformLocation(prg, 'sampleIndex');
+        uniLocation[5] = gl.getUniformLocation(prg, 'textureWeight');
 
-	var position = [
-                -1.0,  1.0,  0.0,
-            1.0,  1.0,  0.0,
-		-1.0, -1.0,  0.0,
-	    1.0, -1.0,  0.0
-	];
-	var index = [
-	    0, 2, 1,
-	    1, 2, 3
-	];
+
+        renderProgram = linkProgram(renderProgram);
+
+        var position = [
+                -1, -1,
+                -1, +1,
+                +1, -1,
+                +1, +1
+        ];
+
 	var vPosition = createVbo(position);
-	var vIndex = createIbo(index);
 	var vAttLocation = gl.getAttribLocation(prg, 'position');
 	gl.bindBuffer(gl.ARRAY_BUFFER, vPosition);
 	gl.enableVertexAttribArray(vAttLocation);
-	gl.vertexAttribPointer(vAttLocation, 3, gl.FLOAT, false, 0, 0);
-	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, vIndex);
+        gl.vertexAttribPointer(vAttLocation, 2, gl.FLOAT, false, 0, 0);
+
+        renderVertexAttribute = gl.getAttribLocation(renderProgram, 'position');
+        gl.enableVertexAttribArray(renderVertexAttribute);
+
+        var framebuffer = gl.createFramebuffer();
 
 	gl.clearColor(0.0, 0.0, 0.0, 1.0);
 	mx = 0.5; my = 0.5;
 	startTime = new Date().getTime();
         gl.viewport(0, 0, cw, ch);
-	render();
+        //	render();
+        var sampleCount = 0;
+        var startTime = new Date().getTime();
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        (function(){
+            var time = new Date().getTime() - startTime;
+
+            gl.useProgram(prg);
+
+            gl.uniform1f(uniLocation[0], time);
+            gl.uniform2fv(uniLocation[1], [mx, my]);
+            gl.uniform2fv(uniLocation[2], [cw, ch]);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, textures[0]);
+            gl.uniform1i(uniLocation[3], 0);
+            gl.uniform1i(uniLocation[4], sampleCount);
+            gl.uniform1f(uniLocation[5], sampleCount / (sampleCount + 1));
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, vPosition);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures[1], 0);
+            gl.vertexAttribPointer(vAttLocation, 2, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+//            gl.flush();
+
+            textures.reverse();
+            sampleCount++;
+
+
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+            gl.useProgram(renderProgram);
+            gl.bindTexture(gl.TEXTURE_2D, textures[0]);
+            gl.bindBuffer(gl.ARRAY_BUFFER, vPosition);
+            gl.vertexAttribPointer(renderVertexAttribute, 2, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            gl.flush();
+
+    	    requestAnimationFrame(arguments.callee);
+        })();
     });
 }
 
